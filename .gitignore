@@ -1,0 +1,10 @@
+.env
+.venv/
+__pycache__/
+*.py[cod]
+.DS_Store
+optimize_run.log
+judge_critiques.jsonl
+optimized/_pending/
+jobs/*/examples.jsonl
+jobs/*/critiques.jsonl

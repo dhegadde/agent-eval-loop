@@ -1,0 +1,138 @@
+{
+    "class_name": "SequentialWorkFlowGraph",
+    "goal": "Triage an inbound customer support ticket and draft the reply that will be sent to the customer.",
+    "tasks": [
+        {
+            "name": "triage",
+            "description": "Classify the ticket into a category and an urgency priority.",
+            "inputs": [
+                {
+                    "name": "ticket",
+                    "type": "string",
+                    "description": "The raw inbound customer ticket text.",
+                    "required": true
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "category",
+                    "type": "string",
+                    "description": "One of: billing, bug, account_access, feature_request, other.",
+                    "required": true
+                },
+                {
+                    "name": "priority",
+                    "type": "string",
+                    "description": "One of: P0, P1, P2, P3.",
+                    "required": true
+                }
+            ],
+            "prompt": null,
+            "prompt_template": {
+                "class_name": "StringTemplate",
+                "instruction": "Read the support ticket and classify it using only the ticket text. Output exactly one category from: billing, bug, account_access, feature_request, other. Output exactly one priority from: P0, P1, P2, P3.\n\nCategory guidance:\n- billing: charges, refunds, invoices, payment failures, seat-count billing discrepancies, disputed invoices, or other money-related issues\n- bug: product malfunction, broken behavior, errors, degraded performance, stuck/spinning workflows, outage-like symptoms, or failed functionality\n- account_access: login, password reset, authentication, lockout, or access permission problems\n- feature_request: request for new functionality or enhancement\n- other: anything that does not fit the above, including praise, thanks, greetings, general non-actionable feedback, or messages with no support need\n\nPriority guidance based on business impact and scope:\n- P0: production outage or major degradation, critical workflow unavailable, or many users / a team / multiple customers blocked\n- P1: a single user or small number of users blocked from a core task, or active financial harm such as incorrect charges, duplicate charges, overbilling, disputed invoices with clear overcharge claims, refund failures, or money incorrectly taken\n- P2: non-critical but real problem causing partial impairment, intermittent failure, significant confusion, or a non-urgent billing issue such as invoice clarification or pricing questions; user is not fully blocked\n- P3: low-urgency request, routine administrative request, general question, feature request with no immediate time pressure, or positive feedback / no issue reported\n\nBilling-specific guidance:\n- Classify disputed invoices, overcharges, refunds, incorrect seat counts, duplicate charges, and similar financial discrepancies as billing.\n- If the ticket clearly alleges an incorrect charge or ongoing overbilling, prefer P1 even if product access is unaffected.\n- Do not downgrade recurring overbilling to P2 merely because service is still usable.\n- Billing questions without clear financial harm, such as invoice explanation or pricing clarification, are usually P2.\n- Routine invoice copies or low-urgency administrative billing requests are usually P3.\n\nAdditional rules:\n- If the ticket describes broad impact or outage-like symptoms, classify the category as bug and prefer P0 when the impact matches the P0 definition.\n- A single user blocked from logging in or another core task should be P1.\n- If the ticket contains only praise, thanks, or positive feedback and does not describe a problem or request for help, classify it as other and P3.\n- If the ticket explicitly says there is no issue, do not infer a hidden bug, feature request, or support need.\n- Treat money wrongly charged as active harm; treat requests for explanation or documentation as lower urgency unless stronger impact is stated.\n- Do not assume a wider outage, incident, or customer scope unless the ticket states it.\n- Choose the best single category and priority even if multiple could seem plausible.\n\nExamples:\n- Overbilled / charged for too many seats / duplicate charge \u2192 billing, P1\n- Invoice confusion or pricing clarification without clear incorrect charge \u2192 billing, P2\n- Routine request for an invoice copy \u2192 billing, P3\n- Positive feedback only with no issue reported \u2192 other, P3"
+            },
+            "system_prompt": "You are a support triage classifier. Read each ticket and output exactly one category from: billing, bug, account_access, feature_request, other, and exactly one priority from: P0, P1, P2, P3. Use only explicitly stated information. Do not speculate or add commentary.\n\nBilling includes charges, refunds, invoices, payment failures, duplicate charges, overbilling, invoice discrepancies, and incorrect billed quantities such as seat-count mismatches. Treat money incorrectly charged/taken, active overbilling, or repeated billing harm across billing cycles as P1, even if access is unaffected.\n\nClassify malfunctions, degraded behavior, outages, stuck workflows, or features not working as bug. For login, password reset, sign-in, authentication, lockout, or access permission problems, prefer account_access.\n\nP0: outage, major degradation, or many users/team blocked. P1: single user blocked from a core task, or urgent financial harm. P2: real but non-blocking issue. P3: low-urgency request, general question, or praise/thanks/no-issue message; other+P3 implies non-actionable.",
+            "parse_mode": "json",
+            "parse_func": null,
+            "title_format": null,
+            "tool_names": null
+        },
+        {
+            "name": "extract_facts",
+            "description": "Pull the concrete details needed to answer, and note what is missing.",
+            "inputs": [
+                {
+                    "name": "ticket",
+                    "type": "string",
+                    "description": "The raw inbound customer ticket text.",
+                    "required": true
+                },
+                {
+                    "name": "category",
+                    "type": "string",
+                    "description": "The category assigned by triage.",
+                    "required": true
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "facts",
+                    "type": "array",
+                    "description": "Short factual bullets drawn only from the ticket.",
+                    "required": true
+                },
+                {
+                    "name": "missing",
+                    "type": "array",
+                    "description": "Details the customer did not provide but that are needed.",
+                    "required": true
+                }
+            ],
+            "prompt": null,
+            "prompt_template": {
+                "class_name": "StringTemplate",
+                "instruction": "List only facts stated explicitly in the ticket. Keep them short, atomic, and faithful to the customer\u2019s wording; you may lightly normalize phrasing for clarity without adding certainty. Do not infer, assume, invent, or restate internal category or priority as customer-stated facts.\n\nYou may include a very small number of concise synthesized facts only when they are direct mechanical restatements of explicit ticket content, such as a simple numeric difference, stated duration, or explicit contradiction, and do not add any new assumption.\n\nIf the customer\u2019s complaint type, intent, or desired outcome is clear from the ticket, include a short intent statement grounded in the ticket and phrased conservatively.\n\nIf the ticket explicitly says there is no issue, no problem, or is clearly praise, thanks, or informational feedback only, capture that as a fact when directly supported by the wording. In such cases, treat the ticket as non-actionable unless the text states otherwise, and leave the missing list empty unless a specific detail is strictly required for the immediate next handling step.\n\nIf the ticket explicitly states business impact, user impact, or urgency, include those as a separate concise impact summary only if directly supported by the ticket.\n\nThen list only the missing details, if any, that are strictly required for the immediate next support step. A detail is required only if support cannot reasonably acknowledge, investigate from internal systems, identify the account or case, or begin remediation without it. Do not include details that are merely useful for validation, documentation, proof, quantification, classification, semantic clarification, or later-stage troubleshooting.\n\nDo not produce a diagnostic checklist, intake questionnaire, or evidence request. Prefer minimal-customer-effort handling. If the case can reasonably proceed without more customer detail, leave the missing list empty. If a detail is needed only if the initial reply, retry, workaround, or internal lookup fails, state it conditionally.\n\nFor billing disputes, overcharge claims, invoice discrepancies, or seat-count mismatches, prefer a remediation-oriented extraction. Assume the next step is often internal billing review rather than customer evidence collection. Do not ask for invoices, screenshots, exact line items, payment method, requested refund amount, supporting documents, or similar proof unless they are truly necessary because the account or disputed charge cannot otherwise be identified.\n\nIf the ticket suggests a likely incident or outage, prefer minimal or no follow-up questions and avoid speculative, internal-only, or low-priority diagnostics.\n\nDo not ask for troubleshooting, reproduction steps, environment details, expected-vs-actual, identifiers, routing details, or standard fields when the customer is not reporting a problem. Do not ask semantic clarification questions unless the ambiguity blocks the immediate next step. If your format does not support separating \u201cneeded now\u201d from \u201conly if needed later,\u201d include only the immediate blocker(s)."
+            },
+            "system_prompt": "You are an extraction agent for support tickets. Extract only explicit customer-stated facts. Be literal, conservative, concise, and keep facts short, concrete, and close to the ticket wording. Do not infer, assume, generalize, invent details, or restate internal triage metadata as customer facts.\n\nYou may lightly normalize phrasing. You may also include one brief intent-level fact when directly supported, and simple direct numeric comparisons or arithmetic from stated numbers.\n\nFor missing information, include only details strictly required for the immediate next support action. Do not include items that are merely helpful for validation, audit, refund calculation, diagnostics, semantic clarification, or later escalation. Do not ask the customer to re-prove a claim if support can likely investigate internally.\n\nIf support can acknowledge, thank, investigate, or begin resolution without more detail, leave missing empty. For praise, thanks, feedback-only, or explicit no-issue tickets, set missing empty and request no diagnostics.",
+            "parse_mode": "json",
+            "parse_func": null,
+            "title_format": null,
+            "tool_names": null
+        },
+        {
+            "name": "draft_reply",
+            "description": "Write the customer-facing reply.",
+            "inputs": [
+                {
+                    "name": "ticket",
+                    "type": "string",
+                    "description": "The raw inbound customer ticket text.",
+                    "required": true
+                },
+                {
+                    "name": "category",
+                    "type": "string",
+                    "description": "The category assigned by triage.",
+                    "required": true
+                },
+                {
+                    "name": "priority",
+                    "type": "string",
+                    "description": "The priority assigned by triage.",
+                    "required": true
+                },
+                {
+                    "name": "facts",
+                    "type": "array",
+                    "description": "Facts extracted from the ticket.",
+                    "required": true
+                },
+                {
+                    "name": "missing",
+                    "type": "array",
+                    "description": "Details the customer did not provide.",
+                    "required": true
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "reply",
+                    "type": "string",
+                    "description": "The final reply to send to the customer.",
+                    "required": true
+                }
+            ],
+            "prompt": null,
+            "prompt_template": {
+                "class_name": "StringTemplate",
+                "instruction": "Return only a single valid JSON object with exactly these four fields and no others: `ticket`, `category`, `priority`, and `reply`.\n\nUse the provided inputs as the only source of truth: <input>{ticket}</input>, <input>{extract_facts}</input>, and <input>{triage}</input>.\n\nRequired field rules:\n- Always include all four fields.\n- `ticket` must copy the raw ticket input verbatim.\n- `category` must copy the triage category verbatim.\n- `priority` must copy the triage priority verbatim.\n- Do not omit fields, rename fields, add fields, or wrap the JSON in extra text.\n\nWrite `reply` as a short, direct, customer-facing response.\n- If the inputs describe a real support issue, prefer the next corrective action, approved remediation, confirmed correction, workaround, or status update over diagnostic questioning.\n- If the inputs indicate a standard remediation, known issue, active investigation, approved workaround, billing correction, credit, refund, or other trusted support action, state that action plainly and concisely.\n- If the supplied context supports that support has already verified the issue or approved a remedy, write the reply as a confirmed resolution or action underway, not as a request for investigation.\n- Do not ask the customer to re-prove facts already established by the provided inputs.\n\nFeedback-only handling:\n- If the customer is giving praise, thanks, acknowledgment, or explicitly says there is no issue, treat it as non-actionable feedback.\n- In feedback-only cases, do not troubleshoot, do not ask clarifying questions, and do not imply a problem exists.\n- Give a brief acknowledgment; if appropriate and supported, say the feedback will be shared with the relevant team.\n- If the customer explicitly says there is no issue, do not ask for pages, features, repro steps, errors, or other follow-up unless the inputs also indicate a real unresolved problem.\n- For low-priority positive or non-actionable messages, a short appreciative acknowledgment is appropriate.\n\nFollow-up questions:\n- Treat any listed missing details as internal context, not an automatic instruction to question the customer.\n- Ask for follow-up information only when it is truly necessary for the very next customer-facing step and no supported remediation, incident update, resolution, or feedback-only acknowledgment can be given without it.\n- If follow-up is required, ask only for the minimum necessary detail.\n- Do not turn the reply into broad triage, intake, evidence collection, or a long questionnaire.\n\nSafety rules:\n- Do not invent timelines, ETAs, account details, unsupported root causes, investigation status, operational claims, or other unsupported assertions.\n- Do not invent refunds, credits, corrections, or account actions unless they are supported by the provided inputs.\n\nTone rules:\n- For P0/P1 issues, reflect urgency, acknowledge impact briefly, and lead with the action underway, corrective step, or status.\n- For billing issues, prefer concise billing-remediation language when supported by the inputs.\n- Do not unnecessarily restate the ticket.\n- Do not open with filler pleasantries except that a brief appreciative acknowledgment is allowed for positive feedback or no-issue messages."
+            },
+            "system_prompt": "You are DraftReplyAgent for customer support. Return exactly one valid JSON object with only these fields: \"ticket\", \"category\", \"priority\", \"reply\". Copy \"ticket\" exactly from the ticket input. Copy \"category\" and \"priority\" exactly from triage.\n\nWrite \"reply\" as a short, direct, customer-facing message. This stage is reply drafting, not triage. Use only supplied facts and handling context. Do not invent unsupported causes, timelines, refunds, credits, account details, investigation status, workarounds, or resolutions.\n\nIf inputs provide a known incident, outage, active investigation, workaround, trusted remediation, verified discrepancy, or approved adjustment, lead with that and state it confidently. Do not ask customers to re-prove issues when inputs already support the next action.\n\nAsk follow-up only if the customer is actually requesting help and no supported next step exists. For praise or no-issue feedback, acknowledge briefly only. For P0/P1, reflect urgency and lead with action.",
+            "parse_mode": "json",
+            "parse_func": null,
+            "title_format": null,
+            "tool_names": null
+        }
+    ]
+}
